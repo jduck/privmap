@@ -1,3 +1,2 @@
 support searching by real/effective/saved/fs uid/gid specifically
-use shortcut when searching by pid (don't scan all processes)
 ignore our own process by default? maybe allow showing it

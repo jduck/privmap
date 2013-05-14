@@ -107,8 +107,16 @@ main(int argc, char *argv[])
                 if (!end || *end) {
                     search_cmd = optarg;
                 }
-                else
-                    search_pid = num;
+                else {
+                    /* search by process id allows us to avoid scanning /proc entirely */
+                    process_t p;
+
+                    memset(&p, 0, sizeof(p));
+                    if (get_process_info(&p, optarg)) {
+                        show_process_info(&p);
+                    }
+                    return 0;
+                }
                 break;
 
             case 'u':
@@ -256,26 +264,17 @@ get_process_info(process_t *pp, const char *pidstr)
         }
         fclose(fp);
     }
+    else {
+        /* NOTE: used to fall back on 'comm', but not anymore */
+        fprintf(stderr, "[!] Unable to open /proc/%s/cmdline!\n", pidstr);
+        return 0;
+    }
 
     /* processes without a cmdline are probably kernel process..
      * their user/groups will always be root
      */
     if (!pp->cmdline[0])
         return 0;
-
-#if 0
-    fp = NULL;
-    if (!cmdline[0])
-        fp = open_proc_entry(pp->pid, pidstr, "comm");
-    if (fp) {
-        len = fread(pp->cmdline, 1, sizeof(pp->cmdline), fp);
-        if (len > 0) {
-            if (pp->cmdline[len - 1] == '\n')
-                pp->cmdline[len - 1] = '\0';
-        }
-        fclose(fp);
-    }
-#endif
 
     return get_privileges(pp, pidstr);
 }
