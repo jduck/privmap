@@ -1,2 +1,4 @@
 support searching by real/effective/saved/fs uid/gid specifically
 ignore our own process by default? maybe allow showing it
+print better error messages when things fail
+

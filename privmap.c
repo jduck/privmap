@@ -115,6 +115,10 @@ main(int argc, char *argv[])
                     if (get_process_info(&p, optarg)) {
                         show_process_info(&p);
                     }
+                    else {
+                        fprintf(stderr, "[!] Unable to get privileges for process id: %s (non-existent or kernel process)\n", optarg);
+                        return 1;
+                    }
                     return 0;
                 }
                 break;
@@ -264,11 +268,8 @@ get_process_info(process_t *pp, const char *pidstr)
         }
         fclose(fp);
     }
-    else {
-        /* NOTE: used to fall back on 'comm', but not anymore */
-        fprintf(stderr, "[!] Unable to open /proc/%s/cmdline!\n", pidstr);
+    else
         return 0;
-    }
 
     /* processes without a cmdline are probably kernel process..
      * their user/groups will always be root
