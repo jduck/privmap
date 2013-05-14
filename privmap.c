@@ -47,6 +47,12 @@ process_t *head = NULL;
 process_t *tail = NULL;
 
 
+/* for searching output */
+pid_t search_pid = -1;
+uid_t search_uid = -1;
+gid_t search_gid = -1;
+
+
 void perror_str(const char *fmt, ...);
 char *my_stpcpy(char *dst, const char *src);
 int get_process_info(process_t *pp, const char *pidstr);
@@ -56,6 +62,8 @@ char *get_user_name(uid_t uid);
 char *get_group_name(gid_t gid);
 FILE *open_proc_entry(pid_t pid, const char *pidstr, const char *entry);
 void add_process(process_t *pp);
+int process_matches(process_t *pp);
+void usage(char *argv[]);
 
 
 int
@@ -64,10 +72,30 @@ main(int argc, char *argv[])
     DIR *pd;
     struct dirent *pe;
     process_t *pp;
+    int c;
 
     if (!(pd = opendir("/proc"))) {
         perror_str("[!] Unable to open /proc");
         return 1;
+    }
+
+    /* process args */
+    while ((c = getopt(argc, argv, "g:p:u:")) != -1) {
+        switch(c) {
+            case 'g':
+                search_gid = atoi(optarg);
+                break;
+            case 'p':
+                search_pid = atoi(optarg);
+                break;
+            case 'u':
+                search_uid = atoi(optarg);
+                break;
+            default:
+                usage(argv);
+                return 1;
+                /* not reached */
+        }
     }
 
     /* first, scan the system to get all the processes and their privileges */
@@ -95,7 +123,8 @@ main(int argc, char *argv[])
 
     /* show the processes info */
     for (pp = head; pp; pp = pp->next) {
-        show_process_info(pp);
+        if (process_matches(pp))
+            show_process_info(pp);
     }
 
     closedir(pd);
@@ -234,13 +263,16 @@ show_process_info(process_t *pp)
         pp->gid.saved, get_group_name(pp->gid.saved),
         pp->gid.fs, get_group_name(pp->gid.fs));
 
-    printf("%11s: ", "groups");
-    for (i = 0; i < pp->ngroups; i++) {
-        printf("%d(%s)", pp->groups[i], get_group_name(pp->groups[i]));
-        if (i != pp->ngroups - 1)
-            printf(", ");
+    if (pp->ngroups > 0) {
+        printf("%11s: ", "groups");
+        for (i = 0; i < pp->ngroups; i++) {
+            printf("%d(%s)", pp->groups[i], get_group_name(pp->groups[i]));
+            if (i != pp->ngroups - 1)
+                printf(", ");
+        }
+        printf("\n");
     }
-    printf("\n\n");
+    printf("\n");
 }
 
         
@@ -321,3 +353,59 @@ add_process(process_t *pp)
     tail = np;
 }
 
+
+int process_matches(process_t *pp)
+{
+    /* no search == show everything */
+    if (search_pid == -1 && search_uid == -1 && search_gid == -1)
+        return 1;
+
+    /* pid search - does it match? */
+    if (search_pid != -1 && pp->pid == search_pid)
+        return 1;
+
+    /* uid search - does it match? */
+    if (search_uid != -1 && 
+            (pp->uid.real == search_uid
+             || pp->uid.effective == search_uid
+             || pp->uid.saved == search_uid
+             || pp->uid.fs == search_uid))
+        return 1;
+
+    /* gid search - does it match? */
+    if (search_gid != -1) {
+        int i;
+
+        if (pp->gid.real == search_gid
+             || pp->gid.effective == search_gid
+             || pp->gid.saved == search_gid
+             || pp->gid.fs == search_gid)
+            return 1;
+
+        /* check supplementary groups */
+        for (i = 0; i < pp->ngroups; i++) {
+            if (pp->groups[i] == search_gid)
+                return 1;
+        }
+    }
+
+    return 0;
+}
+
+
+void
+usage(char *argv[])
+{
+    char *cmd = "privmap";
+
+    if (argv && argv[0])
+        cmd = argv[0];
+    fprintf(stderr,
+        "usage: %s [opts]\n"
+        "\n"
+        "supported options:\n"
+        "-g <gid> \tshow only processes with the specified group id\n"
+        "-p <pid> \tshow only processes with the specified process id\n"
+        "-u <uid> \tshow only processes with the specified user id\n"
+        , cmd);
+}
