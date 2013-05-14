@@ -52,6 +52,7 @@ pid_t search_pid = -1;
 uid_t search_uid = -1;
 gid_t search_gid = -1;
 char *search_cmd = NULL;
+int ignore_self = 1;
 
 
 void perror_str(const char *fmt, ...);
@@ -81,7 +82,7 @@ main(int argc, char *argv[])
     }
 
     /* process args */
-    while ((c = getopt(argc, argv, "g:p:u:")) != -1) {
+    while ((c = getopt(argc, argv, "g:p:su:")) != -1) {
         char *end = NULL;
         int num;
 
@@ -137,6 +138,10 @@ main(int argc, char *argv[])
                 }
                 else
                     search_uid = num;
+                break;
+
+            case 's':
+                ignore_self = !ignore_self;
                 break;
 
             default:
@@ -253,6 +258,9 @@ get_process_info(process_t *pp, const char *pidstr)
 {
     FILE *fp;
     size_t len;
+
+    if (ignore_self && pp->pid == getpid())
+        return 0;
 
     /* first, extract the cmdline, if possible. */
     fp = open_proc_entry(pp->pid, pidstr, "cmdline");
@@ -447,5 +455,6 @@ usage(char *argv[])
         "-g <gid> \tshow only processes with the specified group id or name\n"
         "-p <pid> \tshow only processes with the specified process id or name\n"
         "-u <uid> \tshow only processes with the specified user id or name\n"
+        "-s \tshow privileges for itself too (defaults to hiding itself)\n"
         , cmd);
 }
