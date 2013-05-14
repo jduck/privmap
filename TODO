@@ -1,0 +1,4 @@
+support searching by command name
+allow names via -u and -g
+support searching by real/effective/saved/fs uid/gid specifically
+
