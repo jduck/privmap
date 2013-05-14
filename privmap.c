@@ -33,29 +33,48 @@ typedef struct stru_gids {
     gid_t real, effective, saved, fs;
 } gids_t;
 
+typedef struct stru_process {
+    pid_t pid;
+    char cmdline[8192];
+    struct stru_uids uid;
+    struct stru_gids gid;
+    int ngroups;
+    gid_t groups[NGROUPS_MAX];
+    struct stru_process *next;
+} process_t;
+
+process_t *head = NULL;
+process_t *tail = NULL;
+
 
 void perror_str(const char *fmt, ...);
 char *my_stpcpy(char *dst, const char *src);
-int show_process_info(pid_t pid, const char *pidstr);
-void show_privileges(pid_t pid, const char *pidstr);
+int get_process_info(process_t *pp, const char *pidstr);
+void show_process_info(process_t *pp);
+int get_privileges(process_t *pp, const char *pidstr);
 char *get_user_name(uid_t uid);
 char *get_group_name(gid_t gid);
 FILE *open_proc_entry(pid_t pid, const char *pidstr, const char *entry);
+void add_process(process_t *pp);
 
 
 int
-main(int c, char *v[])
+main(int argc, char *argv[])
 {
     DIR *pd;
     struct dirent *pe;
+    process_t *pp;
 
     if (!(pd = opendir("/proc"))) {
         perror_str("[!] Unable to open /proc");
-        return;
+        return 1;
     }
 
+    /* first, scan the system to get all the processes and their privileges */
     while ((pe = readdir(pd))) {
-        pid_t pid;
+        process_t p;
+
+        memset(&p, 0, sizeof(p));
 
         /* we only care about numeric only directories (pid dirs) */
         if (strtok(pe->d_name, "0123456789"))
@@ -67,14 +86,20 @@ main(int c, char *v[])
                pe->d_reclen,
                pe->d_type, pe->d_name);
 #endif
-        pid = atoi(pe->d_name);
-        if (show_process_info(pid, pe->d_name)) {
-            show_privileges(pid, pe->d_name);
-            printf("\n");
+        p.pid = atoi(pe->d_name);
+        if (get_process_info(&p, pe->d_name)) {
+            /* add it to the list */
+            add_process(&p);
         }
     }
 
+    /* show the processes info */
+    for (pp = head; pp; pp = pp->next) {
+        show_process_info(pp);
+    }
+
     closedir(pd);
+    return 0;
 }
 
 
@@ -107,7 +132,6 @@ char *my_stpcpy(char *dst, const char *src)
 FILE *
 open_proc_entry(pid_t pid, const char *pidstr, const char *entry)
 {
-    FILE *fp;
     char canonical_path[PATH_MAX+1] = { 0 };
     char *end;
     size_t entry_len = strlen(entry);
@@ -148,22 +172,21 @@ get_group_name(gid_t gid)
 
 
 int
-show_process_info(pid_t pid, const char *pidstr)
+get_process_info(process_t *pp, const char *pidstr)
 {
     FILE *fp;
-    char cmdline[8192] = { 0 };
     size_t len;
 
     /* first, extract the cmdline, if possible. */
-    fp = open_proc_entry(pid, pidstr, "cmdline");
+    fp = open_proc_entry(pp->pid, pidstr, "cmdline");
     if (fp) {
-        len = fread(cmdline, 1, sizeof(cmdline) - 1, fp);
+        len = fread(pp->cmdline, 1, sizeof(pp->cmdline) - 1, fp);
         if (len > 0) {
             size_t i;
 
             for (i = 0; i < len; i++) {
-                if (cmdline[i] == '\0')
-                    cmdline[i] = ' ';
+                if (pp->cmdline[i] == '\0')
+                    pp->cmdline[i] = ' ';
             }
         }
         fclose(fp);
@@ -172,36 +195,64 @@ show_process_info(pid_t pid, const char *pidstr)
     /* processes without a cmdline are probably kernel process..
      * their user/groups will always be root
      */
-    if (!cmdline[0])
+    if (!pp->cmdline[0])
         return 0;
+
 #if 0
     fp = NULL;
     if (!cmdline[0])
-        fp = open_proc_entry(pid, pidstr, "comm");
+        fp = open_proc_entry(pp->pid, pidstr, "comm");
     if (fp) {
-        len = fread(cmdline, 1, sizeof(cmdline), fp);
+        len = fread(pp->cmdline, 1, sizeof(pp->cmdline), fp);
         if (len > 0) {
-            if (cmdline[len - 1] == '\n')
-                cmdline[len - 1] = '\0';
+            if (pp->cmdline[len - 1] == '\n')
+                pp->cmdline[len - 1] = '\0';
         }
         fclose(fp);
     }
 #endif
 
-    printf("[*] pid: %d, cmd: %s\n", pid, cmdline);
-    return 1;
+    return get_privileges(pp, pidstr);
 }
 
-
 void
-show_privileges(pid_t pid, const char *pidstr)
+show_process_info(process_t *pp)
+{
+    int i;
+
+    printf("[*] pid: %d, cmd: %s\n", pp->pid, pp->cmdline);
+
+    /* show the privileges */
+    printf("%11s: %d(%s), %d(%s), %d(%s), %d(%s)\n", "uid",
+        pp->uid.real, get_user_name(pp->uid.real),
+        pp->uid.effective, get_user_name(pp->uid.effective),
+        pp->uid.saved, get_user_name(pp->uid.saved),
+        pp->uid.fs, get_user_name(pp->uid.fs));
+    printf("%11s: %d(%s), %d(%s), %d(%s), %d(%s)\n", "gid",
+        pp->gid.real, get_group_name(pp->gid.real),
+        pp->gid.effective, get_group_name(pp->gid.effective),
+        pp->gid.saved, get_group_name(pp->gid.saved),
+        pp->gid.fs, get_group_name(pp->gid.fs));
+
+    printf("%11s: ", "groups");
+    for (i = 0; i < pp->ngroups; i++) {
+        printf("%d(%s)", pp->groups[i], get_group_name(pp->groups[i]));
+        if (i != pp->ngroups - 1)
+            printf(", ");
+    }
+    printf("\n\n");
+}
+
+        
+int
+get_privileges(process_t *pp, const char *pidstr)
 {
     char buf[1024] = { 0 };
-    FILE *fp = open_proc_entry(pid, pidstr, "status");
+    FILE *fp = open_proc_entry(pp->pid, pidstr, "status");
 
     if (!fp) {
         fprintf(stderr, "[!] Unable to open status for pid: %s\n", pidstr);
-        return;
+        return 0;
     }
 
     /* parse the status file */
@@ -210,22 +261,14 @@ show_privileges(pid_t pid, const char *pidstr)
             uids_t u;
 
             if (sscanf(buf, UID_FMT, &u.real, &u.effective, &u.saved, &u.fs) == 4) {
-                printf("%11s: %d(%s), %d(%s), %d(%s), %d(%s)\n", "uid",
-                    u.real, get_user_name(u.real),
-                    u.effective, get_user_name(u.effective),
-                    u.saved, get_user_name(u.saved),
-                    u.fs, get_user_name(u.fs));
+                pp->uid = u;
             }
         }
         else if (strncmp(buf, "Gid:\t", 5) == 0) {
             gids_t g;
 
             if (sscanf(buf, GID_FMT, &g.real, &g.effective, &g.saved, &g.fs) == 4) {
-                printf("%11s: %d(%s), %d(%s), %d(%s), %d(%s)\n", "gid",
-                    g.real, get_group_name(g.real),
-                    g.effective, get_group_name(g.effective),
-                    g.saved, get_group_name(g.saved),
-                    g.fs, get_group_name(g.fs));
+                pp->gid = g;
             }
         }
         else if (strncmp(buf, "Groups:\t", 8) == 0) {
@@ -238,20 +281,43 @@ show_privileges(pid_t pid, const char *pidstr)
                 continue;
 
             /* show supplementary groups */
-            printf("%11s: ", "groups");
             tok = strtok(p, " \t");
             while (tok && tok[0] >= '0' && tok[0] <= '9') {
                 gid_t gid = atoi(tok);
 
+                if (pp->ngroups >= NGROUPS_MAX) {
+                    fprintf(stderr, "[!] Too many groups for pid: %s\n", pidstr);
+                    return 0;
+                }
+
+                pp->groups[pp->ngroups++] = gid;
+
                 //printf("--- TOK: %s\n", tok);
-                printf("%d(%s)", gid, get_group_name(gid));
                 tok = strtok(NULL, " \t");
-                if (tok && tok[0] >= '0' && tok[0] <= '9')
-                    printf(", ");
             }
-            printf("\n");
         }
     }
 
     fclose(fp);
+    return 1;
 }
+
+
+void
+add_process(process_t *pp)
+{
+    process_t *np;
+
+    np = (process_t *)malloc(sizeof(process_t));
+    if (!np) {
+        fprintf(stderr, "[!] Out of memory adding a process!\n");
+        exit(1);
+    }
+    memcpy(np, pp, sizeof(process_t));
+    if (!head)
+        head = np;
+    if (tail)
+        tail->next = np;
+    tail = np;
+}
+
