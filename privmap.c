@@ -51,6 +51,7 @@ process_t *tail = NULL;
 pid_t search_pid = -1;
 uid_t search_uid = -1;
 gid_t search_gid = -1;
+char *search_cmd = NULL;
 
 
 void perror_str(const char *fmt, ...);
@@ -81,16 +82,51 @@ main(int argc, char *argv[])
 
     /* process args */
     while ((c = getopt(argc, argv, "g:p:u:")) != -1) {
+        char *end = NULL;
+        int num;
+
         switch(c) {
             case 'g':
-                search_gid = atoi(optarg);
+                num = strtol(optarg, &end, 0);
+                if (!end || *end) {
+                    /* try to resolve the name */
+                    struct group *pg = getgrnam(optarg);
+
+                    if (!pg) {
+                        fprintf(stderr, "[!] Unknown group name: \"%s\"\n", optarg);
+                        return 1;
+                    }
+                    search_gid = pg->gr_gid;
+                }
+                else
+                    search_gid = num;
                 break;
+
             case 'p':
-                search_pid = atoi(optarg);
+                num = strtol(optarg, &end, 0);
+                if (!end || *end) {
+                    search_cmd = optarg;
+                }
+                else
+                    search_pid = num;
                 break;
+
             case 'u':
-                search_uid = atoi(optarg);
+                num = strtol(optarg, &end, 0);
+                if (!end || *end) {
+                    /* try to resolve the name */
+                    struct passwd *pw = getpwnam(optarg);
+
+                    if (!pw) {
+                        fprintf(stderr, "[!] Unknown user name: \"%s\"\n", optarg);
+                        return 1;
+                    }
+                    search_uid = pw->pw_uid;
+                }
+                else
+                    search_uid = num;
                 break;
+
             default:
                 usage(argv);
                 return 1;
@@ -357,7 +393,7 @@ add_process(process_t *pp)
 int process_matches(process_t *pp)
 {
     /* no search == show everything */
-    if (search_pid == -1 && search_uid == -1 && search_gid == -1)
+    if (search_pid == -1 && search_uid == -1 && search_gid == -1 && !search_cmd)
         return 1;
 
     /* pid search - does it match? */
@@ -389,6 +425,10 @@ int process_matches(process_t *pp)
         }
     }
 
+    /* search by cmd substr */
+    if (search_cmd && strstr(pp->cmdline, search_cmd))
+        return 1;
+
     return 0;
 }
 
@@ -404,8 +444,8 @@ usage(char *argv[])
         "usage: %s [opts]\n"
         "\n"
         "supported options:\n"
-        "-g <gid> \tshow only processes with the specified group id\n"
-        "-p <pid> \tshow only processes with the specified process id\n"
-        "-u <uid> \tshow only processes with the specified user id\n"
+        "-g <gid> \tshow only processes with the specified group id or name\n"
+        "-p <pid> \tshow only processes with the specified process id or name\n"
+        "-u <uid> \tshow only processes with the specified user id or name\n"
         , cmd);
 }
