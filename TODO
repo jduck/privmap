@@ -1,3 +1,4 @@
 support searching by real/effective/saved/fs uid/gid specifically
 print better error messages when things fail
+show process capabilities
 
